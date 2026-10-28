@@ -12,7 +12,7 @@ function recoveryKeyFor(credId) {
 
 function readyAction(view) { return view?.actions?.find((action) => action.state === "ready") || null; }
 
-function extractPreimage(value, paymentHash, depth = 0) {
+export function preimageFromView(value, paymentHash, depth = 0) {
   if (!value || typeof value !== "object" || depth > 12) return null;
   for (const [key, child] of Object.entries(value)) {
     if (/^(preimage|paymentPreimage)$/i.test(key) && typeof child === "string") {
@@ -22,7 +22,7 @@ function extractPreimage(value, paymentHash, depth = 0) {
       if (hash !== paymentHash) throw new Error("PREIMAGE_HASH_MISMATCH");
       return normalized;
     }
-    const nested = extractPreimage(child, paymentHash, depth + 1);
+    const nested = preimageFromView(child, paymentHash, depth + 1);
     if (nested) return nested;
   }
   return null;
@@ -150,7 +150,7 @@ export class CardLightningDriver {
     }
     const view = await this.swapKit.submit(row.orderId, row.action, row.recoveryKey, row.evidence);
     const action = readyAction(view);
-    const preimage = extractPreimage(view, facts.paymentHash);
+    const preimage = preimageFromView(view, facts.paymentHash);
     const status = view.status === "FAILED" ? (action?.kind === "arkade_intents_refund" ? "REFUND_READY" : "REFUND_PENDING") : view.status;
     row = this.journal.saveView(facts.paymentHash, view, action, status, preimage);
     return receipt(row, facts);
@@ -210,7 +210,7 @@ export class CardLightningDriver {
     if (!row.orderId) throw new Error("no committed order to track");
     const view = await this.swapKit.status(row.orderId, row.recoveryKey);
     const action = readyAction(view);
-    const preimage = extractPreimage(view, facts.paymentHash);
+    const preimage = preimageFromView(view, facts.paymentHash);
     const status = view.status === "FAILED" ? (action?.kind === "arkade_intents_refund" ? "REFUND_READY" : "REFUND_PENDING") : view.status;
     row = this.journal.saveView(facts.paymentHash, view, action, status, preimage);
     return receipt(row, facts);

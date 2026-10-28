@@ -114,7 +114,7 @@ export class Journal {
     // Evidence replays always use the ORIGINAL funding action id/key. A later
     // status view may contain no actions or a new refund action; neither may
     // replace the funding submission binding.
-    return this.#update(paymentHash, { view, action: existing.evidence ? existing.action : action, status, preimage });
+    return this.#update(paymentHash, { view, action: existing.evidence ? existing.action : action, status, preimage: preimage || existing.preimage });
   }
   markStatus(paymentHash, status) { return this.#update(paymentHash, { status }); }
 }
