@@ -1,0 +1,12 @@
+node_modules/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+evidence/
+.env
+.env.*
+!.env.example
+.DS_Store
