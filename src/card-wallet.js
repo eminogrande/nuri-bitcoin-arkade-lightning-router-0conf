@@ -147,8 +147,13 @@ export class ProductionCardWallet {
       cardPk33: config.cardPk33, serverPk33: config.serverPk33,
       approve: (args) => flow.prepare(args), cardSign: (args) => flow.sign(args),
     });
+    const arkProvider = new RestArkProvider(config.nodeUrl);
+    const arkInfo = await arkProvider.getInfo();
+    if (arkInfo.network !== "bitcoin") {
+      throw new Error(`ARKADE_NETWORK_MISMATCH network=${arkInfo.network || "unknown"} expected=bitcoin`);
+    }
     const wallet = await Wallet.create({
-      identity, arkProvider: new RestArkProvider(config.nodeUrl),
+      identity, arkProvider,
       indexerProvider: new RestIndexerProvider(config.nodeUrl),
       storage: { walletRepository: new InMemoryWalletRepository(), contractRepository: new InMemoryContractRepository() },
       settlementConfig: false,
@@ -175,7 +180,6 @@ export class ProductionCardWallet {
       final_amount_sats: facts.amountSats, funding_address: action.request.to,
       funding_script_hex: action.request.fundingScriptHex, funding_amount_sats: action.request.amountSats,
       payment_hash: facts.paymentHash, invoice: facts.invoice,
-      provider: "arkade_intents", rfq_id: action.rfqId || orderId,
     };
     return this.wallet.send({ address: action.request.to, amount: action.request.amountSats });
   }

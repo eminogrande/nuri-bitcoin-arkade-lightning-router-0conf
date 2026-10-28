@@ -23,8 +23,8 @@ export function btcToSatsExact(value) {
 
 export function decodeMainnetInvoice(value, expectedAmountSats, nowSeconds = Date.now() / 1000) {
   const invoice = normalizeInvoice(value);
-  if (!invoice.startsWith("lnbc")) {
-    const prefix = invoice.match(/^(lnbcrt|lntbs|lntb|lnbc)/)?.[1] || "unknown";
+  const prefix = invoice.match(/^(lnbcrt|lntbs|lntb|lnbc)/)?.[1] || "unknown";
+  if (prefix !== "lnbc") {
     throw new Error(`INVOICE_NETWORK_MISMATCH prefix=${prefix} expected=lnbc`);
   }
   const amountSats = Number(expectedAmountSats);

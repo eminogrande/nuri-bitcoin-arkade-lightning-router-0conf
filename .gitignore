@@ -1,7 +1,11 @@
 node_modules/
+.run/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+*.journal.json
+*.lock
+*.tmp
 *.db
 *.db-shm
 *.db-wal

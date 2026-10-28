@@ -8,8 +8,8 @@
     "node": ">=22.13.0 <27"
   },
   "scripts": {
-    "card-lightning": "node --experimental-sqlite ./cli.js",
-    "test": "node --experimental-sqlite --test test/*.test.js"
+    "card-lightning": "node ./cli.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@arkade-os/sdk": "0.4.74",

@@ -23,6 +23,7 @@ test("quote settle mismatch is refused before order creation", async () => {
 
 test("wrong Lightning network is rejected independently of invoice checksum", () => {
   assert.throws(() => decodeMainnetInvoice(INVOICE.replace(/^lnbc/, "lntb"), AMOUNT, 0), /INVOICE_NETWORK_MISMATCH/);
+  assert.throws(() => decodeMainnetInvoice(INVOICE.replace(/^lnbc/, "lnbcrt"), AMOUNT, 0), /INVOICE_NETWORK_MISMATCH/);
 });
 
 test("dry-run create/finalize gates do not commit, sign, or fund", async () => {

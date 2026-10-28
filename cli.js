@@ -9,7 +9,7 @@ import { ProductionCardWallet } from "./src/card-wallet.js";
 function parseArgs(argv) {
   const command = argv[0];
   if (!["quote", "create", "finalize", "track"].includes(command)) {
-    throw new Error("usage: cli.js quote|create|finalize|track --config card.json --db payments.sqlite --invoice lnbc... --amount-sats N [--order-id ord_...] [--execute]");
+    throw new Error("usage: cli.js quote|create|finalize|track --config card.json --db payments.journal.json --invoice lnbc... --amount-sats N [--order-id ord_...] [--execute]");
   }
   const args = { command, execute: false };
   for (let i = 1; i < argv.length; i += 1) {

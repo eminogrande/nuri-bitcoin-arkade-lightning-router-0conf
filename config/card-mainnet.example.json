@@ -1,0 +1,13 @@
+{
+  "owner": "0xREPLACE_WITH_EXISTING_SWAPKIT_OWNER_EOA",
+  "cardPk33": "02REPLACE_WITH_EXISTING_CARD_MUSIG2_PUBKEY",
+  "serverPk33": "02REPLACE_WITH_EXISTING_NURI_SERVER_PUBKEY",
+  "credId": "REPLACE_WITH_EXISTING_CARD_CREDENTIAL_ID_B64U",
+  "credProfile": "REPLACE_WITH_EXISTING_NURI_CARD_RECEIVE_PROFILE",
+  "rpId": "REPLACE_WITH_EXISTING_PROFILE_RP_ID",
+  "origin": "https://REPLACE_WITH_EXISTING_PROFILE_ORIGIN",
+  "python": "/Users/eminmahrt/Developer/nuri-card-wt/w35-musig2-fast/scripts/run-card-python.sh",
+  "prfScript": "/Users/eminmahrt/Developer/nuri-card-wt/w35-musig2-fast/scripts/card-prf-backup.py",
+  "claimSigner": "/Users/eminmahrt/Developer/nuri-card-wt/w35-musig2-fast/scripts/card-arkade-claim-signer.py",
+  "cardAid": "4E5552494D55473301"
+}
