@@ -9,7 +9,8 @@ npm ci
 mkdir -p .run
 cp config/card-mainnet.example.json .run/card.json
 # Edit .run/card.json: existing SwapKit owner EOA, card/server pubkeys,
-# existing credential/profile/rpId/origin. No PIN or private key in this file.
+# existing account's expectedArkAddress/expectedOffchainScript, and existing
+# credential/profile/rpId/origin. No PIN or private key in this file.
 
 CONFIG="$ROOT/.run/card.json"
 JOURNAL="$ROOT/.run/card-lightning.journal.json"

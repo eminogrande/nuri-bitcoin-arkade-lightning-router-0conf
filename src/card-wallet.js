@@ -2,8 +2,10 @@ import * as btc from "@scure/btc-signer";
 import { tapLeafHash } from "@scure/btc-signer/payment.js";
 import * as musig2 from "@scure/btc-signer/musig2.js";
 import {
-  ArkAddress, InMemoryContractRepository, InMemoryWalletRepository,
-  RestArkProvider, RestIndexerProvider, Wallet, provisionRefundKey,
+  ArkAddress, ContractManager, CSVMultisigTapscript, InMemoryContractRepository,
+  InMemoryWalletRepository, MultisigTapscript, RestArkProvider, RestIndexerProvider,
+  VtxoScript, Wallet, contractHandlers, provisionRefundKey, sequenceToTimelock,
+  timelockToSequence,
 } from "@arkade-os/sdk";
 import { CardHostBridge } from "./card-host.js";
 import { NuriApi } from "./nuri-api.js";
@@ -92,6 +94,179 @@ export class CardBackedAggregateIdentity {
   }
 }
 
+const NURI_RECOVERY_TYPE = "nuri_client_recovery_v1";
+const NURI_SERVER_CSV = { type: "seconds", value: 6674432n };
+
+function addCsv(left, right) {
+  if (left?.type !== right?.type) throw new Error("Nuri recovery CSV units differ");
+  return { type: left.type, value: BigInt(left.value) + BigInt(right.value) };
+}
+
+function nuriCsvSpendable(context, sequence) {
+  const vtxo = context.vtxo;
+  if (!vtxo) return false;
+  const timelock = sequenceToTimelock(sequence);
+  if (timelock.type === "blocks") {
+    const height = Number(context.blockHeight);
+    const created = Number(vtxo.status?.block_height ?? vtxo.status?.blockHeight);
+    return Number.isFinite(height) && Number.isFinite(created) && height - created >= Number(timelock.value);
+  }
+  const created = Number(vtxo.status?.block_time ?? vtxo.status?.blockTime);
+  return Number.isFinite(created) && Number(context.currentTime || 0) / 1000 - created >= Number(timelock.value);
+}
+
+export class NuriRecoveryVtxoScript extends VtxoScript {
+  constructor(params) {
+    const arkadePath = MultisigTapscript.encode({
+      pubkeys: [params.aggregatePubKey, params.arkadeServerPubKey],
+    }).script;
+    const aggregateRecovery = CSVMultisigTapscript.encode({
+      timelock: params.arkadeCsvTimelock, pubkeys: [params.aggregatePubKey],
+    }).script;
+    const clientRecovery = CSVMultisigTapscript.encode({
+      timelock: addCsv(params.arkadeCsvTimelock, params.nuriServerCsvTimelock),
+      pubkeys: [params.clientPubKey],
+    }).script;
+    super([arkadePath, aggregateRecovery, clientRecovery]);
+    this.options = {
+      ...params, pubKey: params.aggregatePubKey, serverPubKey: params.arkadeServerPubKey,
+      csvTimelock: params.arkadeCsvTimelock,
+    };
+    this.arkadePathScript = bytesToHex(arkadePath);
+    this.aggregateRecoveryScript = bytesToHex(aggregateRecovery);
+    this.clientRecoveryScript = bytesToHex(clientRecovery);
+  }
+  forfeit() { return this.findLeaf(this.arkadePathScript); }
+  exit() { return this.findLeaf(this.aggregateRecoveryScript); }
+  aggregateRecovery() { return this.exit(); }
+  clientRecovery() { return this.findLeaf(this.clientRecoveryScript); }
+  get exitScript() { return this.aggregateRecoveryScript; }
+}
+
+export const NuriRecoveryContractHandler = {
+  type: NURI_RECOVERY_TYPE,
+  createScript(params) { return new NuriRecoveryVtxoScript(this.deserializeParams(params)); },
+  serializeParams(params) {
+    return {
+      aggregatePubKey: bytesToHex(params.aggregatePubKey),
+      clientPubKey: bytesToHex(params.clientPubKey),
+      nuriServerPubKey: bytesToHex(params.nuriServerPubKey),
+      arkadeServerPubKey: bytesToHex(params.arkadeServerPubKey),
+      arkadeCsvTimelock: String(timelockToSequence(params.arkadeCsvTimelock)),
+      nuriServerCsvTimelock: String(timelockToSequence(params.nuriServerCsvTimelock)),
+      clientCsvTimelock: String(timelockToSequence(addCsv(params.arkadeCsvTimelock, params.nuriServerCsvTimelock))),
+    };
+  },
+  deserializeParams(params) {
+    for (const field of ["aggregatePubKey", "clientPubKey", "nuriServerPubKey", "arkadeServerPubKey", "arkadeCsvTimelock", "nuriServerCsvTimelock"]) {
+      if (!params[field]) throw new Error(`Nuri recovery contract param required: ${field}`);
+    }
+    return {
+      aggregatePubKey: hexToBytes(params.aggregatePubKey),
+      clientPubKey: hexToBytes(params.clientPubKey),
+      nuriServerPubKey: hexToBytes(params.nuriServerPubKey),
+      arkadeServerPubKey: hexToBytes(params.arkadeServerPubKey),
+      arkadeCsvTimelock: sequenceToTimelock(Number(params.arkadeCsvTimelock)),
+      nuriServerCsvTimelock: sequenceToTimelock(Number(params.nuriServerCsvTimelock)),
+    };
+  },
+  isGenericallySpendable() { return true; },
+  selectPath(script, _contract, context) {
+    if (context.collaborative) return { leaf: script.forfeit() };
+    const aggregateSequence = timelockToSequence(script.options.arkadeCsvTimelock);
+    const clientSequence = timelockToSequence(addCsv(script.options.arkadeCsvTimelock, script.options.nuriServerCsvTimelock));
+    if (nuriCsvSpendable(context, clientSequence)) return { leaf: script.clientRecovery(), sequence: clientSequence };
+    if (nuriCsvSpendable(context, aggregateSequence)) return { leaf: script.aggregateRecovery(), sequence: aggregateSequence };
+    return null;
+  },
+  getAllSpendingPaths(script, _contract, context) {
+    const paths = context.collaborative ? [{ leaf: script.forfeit() }] : [];
+    paths.push(
+      { leaf: script.aggregateRecovery(), sequence: timelockToSequence(script.options.arkadeCsvTimelock) },
+      { leaf: script.clientRecovery(), sequence: timelockToSequence(addCsv(script.options.arkadeCsvTimelock, script.options.nuriServerCsvTimelock)) },
+    );
+    return paths;
+  },
+  getSpendablePaths(script, contract, context) {
+    return this.getAllSpendingPaths(script, contract, context).filter((path) =>
+      path.sequence ? nuriCsvSpendable(context, path.sequence) : context.collaborative);
+  },
+};
+
+function buildRecoveryScripts(wallet, identity) {
+  const base = {
+    aggregatePubKey: identity.aggregatedXonly,
+    clientPubKey: identity.clientPk33.slice(1),
+    nuriServerPubKey: identity.serverPk33.slice(1),
+    arkadeServerPubKey: wallet.arkServerPublicKey,
+    nuriServerCsvTimelock: NURI_SERVER_CSV,
+  };
+  const offchainParams = { ...base, arkadeCsvTimelock: wallet.offchainTapscript?.options?.csvTimelock };
+  const boardingParams = { ...base, arkadeCsvTimelock: wallet.boardingTapscript?.options?.csvTimelock };
+  if (!offchainParams.arkadeCsvTimelock || !boardingParams.arkadeCsvTimelock) {
+    throw new Error("Nuri recovery default CSV timelock unavailable");
+  }
+  const offchainScript = new NuriRecoveryVtxoScript(offchainParams);
+  const boardingScript = new NuriRecoveryVtxoScript(boardingParams);
+  return {
+    offchainParams, boardingParams, offchainScript, boardingScript,
+    offchainScriptHex: bytesToHex(offchainScript.pkScript),
+    boardingScriptHex: bytesToHex(boardingScript.pkScript),
+    offchainAddress: offchainScript.address(wallet.network.hrp, wallet.arkServerPublicKey).encode(),
+    boardingAddress: boardingScript.address(wallet.network.hrp, wallet.arkServerPublicKey).encode(),
+  };
+}
+
+function assertExpectedRecovery(config, scripts) {
+  const expectedAddress = String(config.expectedArkAddress);
+  const expectedScript = String(config.expectedOffchainScript).toLowerCase();
+  const decoded = ArkAddress.decode(expectedAddress);
+  if (decoded.encode() !== expectedAddress || bytesToHex(decoded.pkScript) !== expectedScript) {
+    throw new Error("ARKADE_EXPECTED_CONFIG_MISMATCH address/script");
+  }
+  if (scripts.offchainAddress !== expectedAddress) {
+    throw new Error(`ARKADE_ADDRESS_MISMATCH expected=${expectedAddress} actual=${scripts.offchainAddress}`);
+  }
+  if (scripts.offchainScriptHex !== expectedScript) {
+    throw new Error(`ARKADE_OFFCHAIN_SCRIPT_MISMATCH expected=${expectedScript} actual=${scripts.offchainScriptHex}`);
+  }
+}
+
+function installRecoveryWallet(wallet, identity, storage, config) {
+  const scripts = buildRecoveryScripts(wallet, identity);
+  assertExpectedRecovery(config, scripts);
+  if (contractHandlers.has(NURI_RECOVERY_TYPE)) contractHandlers.unregister(NURI_RECOVERY_TYPE);
+  contractHandlers.register(NuriRecoveryContractHandler);
+  wallet._offchainTapscript = scripts.offchainScript;
+  wallet._boardingTapscript = scripts.boardingScript;
+  wallet.getWalletScripts = async () => [scripts.offchainScriptHex, scripts.boardingScriptHex];
+  wallet.getScriptMap = async () => new Map([
+    [scripts.offchainScriptHex, scripts.offchainScript], [scripts.boardingScriptHex, scripts.boardingScript],
+  ]);
+  wallet.initializeContractManager = async () => {
+    const manager = await ContractManager.create({
+      indexerProvider: wallet.indexerProvider, contractRepository: storage.contractRepository,
+      walletRepository: storage.walletRepository, watcherConfig: wallet.watcherConfig,
+    });
+    for (const role of ["wallet_default", "wallet_boarding"]) {
+      const boarding = role === "wallet_boarding";
+      const script = boarding ? scripts.boardingScript : scripts.offchainScript;
+      await manager.createContract({
+        label: boarding ? "Nuri recovery wallet boarding" : "Nuri recovery wallet default",
+        type: NURI_RECOVERY_TYPE,
+        params: NuriRecoveryContractHandler.serializeParams(boarding ? scripts.boardingParams : scripts.offchainParams),
+        script: boarding ? scripts.boardingScriptHex : scripts.offchainScriptHex,
+        address: boarding ? scripts.boardingAddress : scripts.offchainAddress,
+        state: "active", metadata: { role },
+      });
+    }
+    return manager;
+  };
+  wallet._contractManager = undefined;
+  wallet._contractManagerInitializing = undefined;
+  return scripts;
+}
+
 class NuriSendFlow {
   constructor(config, bridge, api) {
     this.config = config; this.bridge = bridge; this.api = api;
@@ -136,7 +311,7 @@ export class ProductionCardWallet {
   }
 
   static async create(config, journalDirectory) {
-    for (const field of ["cardPk33", "serverPk33", "credId", "credProfile", "rpId", "origin", "python", "prfScript", "claimSigner"]) {
+    for (const field of ["cardPk33", "serverPk33", "credId", "credProfile", "rpId", "origin", "python", "prfScript", "claimSigner", "expectedArkAddress", "expectedOffchainScript"]) {
       if (!config[field]) throw new Error(`card config field required: ${field}`);
     }
     if (!globalThis.EventSource) globalThis.EventSource = (await import("eventsource")).EventSource;
@@ -152,12 +327,15 @@ export class ProductionCardWallet {
     if (arkInfo.network !== "bitcoin") {
       throw new Error(`ARKADE_NETWORK_MISMATCH network=${arkInfo.network || "unknown"} expected=bitcoin`);
     }
+    const storage = { walletRepository: new InMemoryWalletRepository(), contractRepository: new InMemoryContractRepository() };
     const wallet = await Wallet.create({
       identity, arkProvider,
       indexerProvider: new RestIndexerProvider(config.nodeUrl),
-      storage: { walletRepository: new InMemoryWalletRepository(), contractRepository: new InMemoryContractRepository() },
+      storage,
       settlementConfig: false,
     });
+    installRecoveryWallet(wallet, identity, storage, config);
+    await wallet.getContractManager();
     return new ProductionCardWallet(config, wallet, flow, api);
   }
 
