@@ -1,17 +1,20 @@
 {
-  "name": "nuri-arkade-lightning-fronter-poc",
+  "name": "nuri-card-arkade-lightning-driver",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Minimal regtest-only outgoing Arkade VHTLC to Core Lightning fronter POC",
+  "description": "One outgoing mainnet BOLT11 payment from an existing Nuri card Arkade wallet through the existing SwapKit v2 corridor",
   "engines": {
-    "node": ">=22.12.0 <25"
+    "node": ">=22.13.0 <27"
   },
   "scripts": {
-    "test": "node --experimental-sqlite --test test/cln.test.js test/proof.test.js test/swap.test.js test/vhtlc.test.js",
-    "proof:regtest": "node --experimental-sqlite ./scripts/regtest-proof.js"
+    "card-lightning": "node --experimental-sqlite ./cli.js",
+    "test": "node --experimental-sqlite --test test/*.test.js"
   },
   "dependencies": {
-    "@arkade-os/sdk": "0.4.54"
+    "@arkade-os/sdk": "0.4.74",
+    "@scure/btc-signer": "2.0.1",
+    "eventsource": "4.1.0",
+    "light-bolt11-decoder": "3.2.0"
   }
 }

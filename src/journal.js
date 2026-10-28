@@ -2,179 +2,119 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-export const STATES = [
-    "quoted",
-    "funded",
-    "settling",
-    "claiming",
-    "completed",
-    "settlement_unknown",
-    "refund_pending",
-    "refunded",
-    "manual_review",
-];
+const JSON_FIELDS = new Set(["request", "quote", "option", "recovery", "view", "action", "evidence", "completion"]);
+const COLUMNS = {
+  invoice: "invoice", invoiceSha256: "invoice_sha256", amountSats: "amount_sats", owner: "owner",
+  request: "request_json", quote: "quote_json", option: "option_json", idempotencyKey: "idempotency_key",
+  recoveryKey: "recovery_key", recovery: "recovery_json", orderId: "order_id", view: "view_json",
+  action: "action_json", sendIntentId: "send_intent_id", fundingTxid: "funding_txid",
+  evidence: "evidence_json", completion: "completion_json", preimage: "preimage", status: "status",
+};
 
-const PATCH_COLUMNS = new Set([
-    "preimage",
-    "ark_txid",
-    "signed_checkpoint_txs_json",
-    "last_error",
-]);
-
-function rowToSwap(row) {
-    if (!row) return null;
-    return {
-        ...row,
-        terms: JSON.parse(row.terms_json),
-        claimPlan: JSON.parse(row.claim_plan_json),
-        signedCheckpointTxs: row.signed_checkpoint_txs_json
-            ? JSON.parse(row.signed_checkpoint_txs_json)
-            : null,
-    };
+function canonical(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+}
+function json(value) { return value == null ? null : canonical(value); }
+function parseRow(row) {
+  if (!row) return null;
+  const out = {};
+  for (const [field, column] of Object.entries(COLUMNS)) {
+    const value = row[column];
+    out[field] = JSON_FIELDS.has(field) && value != null ? JSON.parse(value) : value ?? null;
+  }
+  out.paymentHash = row.payment_hash;
+  out.fundingStartedAt = row.funding_started_at ?? null;
+  out.createdAt = row.created_at;
+  out.updatedAt = row.updated_at;
+  return out;
 }
 
 export class Journal {
-    constructor(path) {
-        if (path !== ":memory:") {
-            mkdirSync(dirname(path), { recursive: true });
-        }
-        this.db = new DatabaseSync(path);
-        this.db.exec("PRAGMA journal_mode = WAL");
-        this.db.exec("PRAGMA synchronous = FULL");
-        this.db.exec("PRAGMA foreign_keys = ON");
-        this.db.exec("PRAGMA busy_timeout = 5000");
-        this.db.exec(`
-            CREATE TABLE IF NOT EXISTS swaps (
-                payment_hash TEXT PRIMARY KEY,
-                outpoint TEXT NOT NULL UNIQUE,
-                state TEXT NOT NULL CHECK (state IN (
-                    'quoted', 'funded', 'settling', 'claiming', 'completed',
-                    'settlement_unknown', 'refund_pending', 'refunded', 'manual_review'
-                )),
-                request_digest TEXT NOT NULL,
-                tx_digest TEXT NOT NULL,
-                invoice TEXT NOT NULL,
-                invoice_digest TEXT NOT NULL,
-                amount_msat TEXT NOT NULL,
-                invoice_expires_at INTEGER NOT NULL,
-                network TEXT NOT NULL,
-                terms_json TEXT NOT NULL,
-                vhtlc_address TEXT NOT NULL,
-                vhtlc_pk_script TEXT NOT NULL,
-                claim_plan_json TEXT NOT NULL,
-                preimage TEXT,
-                ark_txid TEXT,
-                signed_checkpoint_txs_json TEXT,
-                last_error TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
-    }
+  constructor(path) {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    this.db = new DatabaseSync(path);
+    this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;");
+    this.db.exec(`CREATE TABLE IF NOT EXISTS payments (
+      payment_hash TEXT PRIMARY KEY, invoice TEXT NOT NULL, invoice_sha256 TEXT NOT NULL,
+      amount_sats INTEGER NOT NULL, owner TEXT NOT NULL, request_json TEXT, quote_json TEXT,
+      option_json TEXT, idempotency_key TEXT UNIQUE, recovery_key TEXT, recovery_json TEXT,
+      order_id TEXT UNIQUE, view_json TEXT, action_json TEXT, send_intent_id TEXT,
+      funding_started_at INTEGER, funding_txid TEXT, evidence_json TEXT, completion_json TEXT,
+      preimage TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    )`);
+  }
 
-    close() {
-        this.db.close();
-    }
+  get(paymentHash) { return parseRow(this.db.prepare("SELECT * FROM payments WHERE payment_hash=?").get(paymentHash)); }
+  close() { this.db.close(); }
 
-    get(paymentHash) {
-        return rowToSwap(
-            this.db.prepare("SELECT * FROM swaps WHERE payment_hash = ?").get(paymentHash),
-        );
+  #assertBinding(existing, changes) {
+    if (!existing) return;
+    for (const field of ["invoice", "amountSats", "owner", "request", "idempotencyKey", "recoveryKey", "orderId"]) {
+      if (changes[field] == null || existing[field] == null) continue;
+      if (json(changes[field]) !== json(existing[field])) throw new Error(`REPLAY_BINDING_MISMATCH ${field}`);
     }
+    if (existing.evidence && changes.evidence && json(existing.evidence) !== json(changes.evidence)) {
+      throw new Error("REPLAY_BINDING_MISMATCH funding evidence");
+    }
+    if (existing.fundingTxid && changes.fundingTxid && existing.fundingTxid !== changes.fundingTxid) {
+      throw new Error("REPLAY_BINDING_MISMATCH funding txid");
+    }
+  }
 
-    getByOutpoint(outpoint) {
-        return rowToSwap(this.db.prepare("SELECT * FROM swaps WHERE outpoint = ?").get(outpoint));
-    }
+  #update(paymentHash, changes) {
+    const existing = this.get(paymentHash);
+    if (!existing) throw new Error("payment is not journaled");
+    this.#assertBinding(existing, changes);
+    const fields = Object.keys(changes).filter((key) => COLUMNS[key] && changes[key] !== undefined);
+    if (!fields.length) return existing;
+    const assignments = fields.map((key) => `${COLUMNS[key]}=?`).join(", ");
+    const values = fields.map((key) => JSON_FIELDS.has(key) ? json(changes[key]) : changes[key]);
+    this.db.prepare(`UPDATE payments SET ${assignments}, updated_at=? WHERE payment_hash=?`)
+      .run(...values, Date.now(), paymentHash);
+    return this.get(paymentHash);
+  }
 
-    reserve(swap) {
-        this.db.exec("BEGIN IMMEDIATE");
-        try {
-            const existing =
-                this.get(swap.paymentHash) || this.getByOutpoint(swap.outpoint);
-            if (existing) {
-                if (
-                    existing.payment_hash === swap.paymentHash &&
-                    existing.outpoint === swap.outpoint &&
-                    existing.request_digest === swap.requestDigest &&
-                    existing.tx_digest === swap.txDigest
-                ) {
-                    this.db.exec("COMMIT");
-                    return { swap: existing, resumed: true };
-                }
-                throw new Error("conflicting outpoint or payment-hash reservation");
-            }
-            this.db
-                .prepare(`
-                    INSERT INTO swaps (
-                        payment_hash, outpoint, state, request_digest, tx_digest,
-                        invoice, invoice_digest, amount_msat, invoice_expires_at,
-                        network, terms_json, vhtlc_address, vhtlc_pk_script, claim_plan_json
-                    ) VALUES (?, ?, 'funded', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `)
-                .run(
-                    swap.paymentHash,
-                    swap.outpoint,
-                    swap.requestDigest,
-                    swap.txDigest,
-                    swap.invoice,
-                    swap.invoiceDigest,
-                    swap.amountMsat,
-                    swap.invoiceExpiresAt,
-                    swap.network,
-                    JSON.stringify(swap.terms),
-                    swap.vhtlcAddress,
-                    swap.vhtlcPkScript,
-                    JSON.stringify(swap.claimPlan),
-                );
-            const inserted = this.get(swap.paymentHash);
-            this.db.exec("COMMIT");
-            return { swap: inserted, resumed: false };
-        } catch (error) {
-            this.db.exec("ROLLBACK");
-            throw error;
-        }
+  saveQuote(data) {
+    const existing = this.get(data.paymentHash);
+    if (existing) {
+      this.#assertBinding(existing, data);
+      if (existing.orderId) return existing;
+      return this.#update(data.paymentHash, data);
     }
+    const now = Date.now();
+    this.db.prepare(`INSERT INTO payments (
+      payment_hash,invoice,invoice_sha256,amount_sats,owner,request_json,quote_json,option_json,
+      idempotency_key,recovery_key,recovery_json,status,created_at,updated_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      data.paymentHash, data.invoice, data.invoiceSha256, data.amountSats, data.owner,
+      json(data.request), json(data.quote), json(data.option), data.idempotencyKey,
+      data.recoveryKey, json(data.recovery), data.status || "QUOTED", now, now,
+    );
+    return this.get(data.paymentHash);
+  }
 
-    transition(paymentHash, allowedStates, nextState, patch = {}) {
-        if (!STATES.includes(nextState)) {
-            throw new Error(`unknown swap state ${nextState}`);
-        }
-        for (const key of Object.keys(patch)) {
-            if (!PATCH_COLUMNS.has(key)) {
-                throw new Error(`journal patch column is not allowed: ${key}`);
-            }
-        }
-        this.db.exec("BEGIN IMMEDIATE");
-        try {
-            const current = this.get(paymentHash);
-            if (!current) {
-                throw new Error(`swap not found: ${paymentHash}`);
-            }
-            if (current.state !== nextState && !allowedStates.includes(current.state)) {
-                throw new Error(`invalid swap transition ${current.state} -> ${nextState}`);
-            }
-            const assignments = ["state = ?", "updated_at = CURRENT_TIMESTAMP"];
-            const values = [nextState];
-            for (const [key, value] of Object.entries(patch)) {
-                assignments.push(`${key} = ?`);
-                values.push(value);
-            }
-            values.push(paymentHash);
-            this.db
-                .prepare(`UPDATE swaps SET ${assignments.join(", ")} WHERE payment_hash = ?`)
-                .run(...values);
-            const updated = this.get(paymentHash);
-            this.db.exec("COMMIT");
-            return updated;
-        } catch (error) {
-            this.db.exec("ROLLBACK");
-            throw error;
-        }
-    }
+  beginCommit(paymentHash) { return this.#update(paymentHash, { status: "COMMITTING" }); }
+  saveCreated(paymentHash, data) { return this.#update(paymentHash, { ...data, status: "READY_TO_FUND" }); }
+  saveSendIntent(paymentHash, sendIntentId) { return this.#update(paymentHash, { sendIntentId }); }
 
-    noteError(paymentHash, allowedStates, error) {
-        return this.transition(paymentHash, allowedStates, this.get(paymentHash).state, {
-            last_error: error instanceof Error ? error.message : String(error),
-        });
-    }
+  claimFunding(paymentHash) {
+    const result = this.db.prepare(`UPDATE payments SET funding_started_at=?,status='FUNDING_STARTED',updated_at=?
+      WHERE payment_hash=? AND funding_started_at IS NULL AND evidence_json IS NULL AND order_id IS NOT NULL`)
+      .run(Date.now(), Date.now(), paymentHash);
+    return Number(result.changes) === 1;
+  }
+
+  saveFundingTxid(paymentHash, fundingTxid) { return this.#update(paymentHash, { fundingTxid, status: "FUNDED_UNREPORTED" }); }
+  saveEvidence(paymentHash, evidence) { return this.#update(paymentHash, { evidence, status: "EVIDENCE_JOURNALED" }); }
+  saveCompletion(paymentHash, completion) { return this.#update(paymentHash, { completion }); }
+  saveView(paymentHash, view, action, status, preimage = null) {
+    const existing = this.get(paymentHash);
+    // Evidence replays always use the ORIGINAL funding action id/key. A later
+    // status view may contain no actions or a new refund action; neither may
+    // replace the funding submission binding.
+    return this.#update(paymentHash, { view, action: existing.evidence ? existing.action : action, status, preimage });
+  }
+  markStatus(paymentHash, status) { return this.#update(paymentHash, { status }); }
 }
