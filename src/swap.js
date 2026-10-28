@@ -54,6 +54,9 @@ function normalizeRequest(request) {
 }
 
 function normalizeDecodedInvoice(decoded) {
+    if (decoded.valid !== true || decoded.type !== "bolt11 invoice") {
+        throw new Error("CLN decode did not return a valid BOLT11 invoice");
+    }
     const createdAt = unixSeconds(decoded.created_at, "decoded invoice created_at");
     const expiry = unixSeconds(decoded.expiry, "decoded invoice expiry");
     return {

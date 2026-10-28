@@ -62,7 +62,8 @@ export class ClnAdapter {
         if (BigInt(normalizedAmount) <= 0n) {
             throw new Error("xpay amount must be greater than zero");
         }
-        return this.call("xpay", [invoice, normalizedAmount]);
+        // This POC requires amount-bearing invoices; CLN rejects amount_msat here.
+        return this.call("xpay", [invoice]);
     }
 
     async listPays(paymentHash) {

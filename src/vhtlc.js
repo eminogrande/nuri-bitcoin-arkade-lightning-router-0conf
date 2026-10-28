@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { VHTLC, networks } from "@arkade-os/sdk";
 import {
     expectHex,
@@ -15,7 +16,9 @@ export function paymentHashForPreimage(preimage) {
 
 export function preimageHashForPaymentHash(paymentHash) {
     const normalized = expectHex(paymentHash, 32, "payment hash");
-    return hash160(Buffer.from(normalized, "hex"));
+    // The claim witness is the LN preimage. HASH160(preimage) equals
+    // RIPEMD160(SHA256(preimage)), and payment_hash is SHA256(preimage).
+    return createHash("ripemd160").update(Buffer.from(normalized, "hex")).digest();
 }
 
 export function normalizeDelay(value, name) {
