@@ -23,3 +23,11 @@
 - Decision: map solver failure to `REFUND_READY` or `REFUND_PENDING`; never label it paid and never sign a refund in this scoped driver (`src/driver.js:207-216`).
 - Why: the requested scope is one outgoing payment, with explicit solver failure/refund evidence rather than a generic swap framework.
 - Consequence: refund signing remains a separate live operation and is UNVERIFIED here.
+
+## D4 — Expose only the proven outgoing flow through one MCP tool
+
+- Date: 2026-10-29
+- Status: ACTIVE
+- Decision: serve one `0conf` tool with `quote`/`create`/`finalize`/`track` over a minimal `node:http` server; create and finalize remain dry unless `execute:true` is explicit.
+- Why: package the mainnet-proven corridor without adding infrastructure or implying that the reverse flow exists.
+- Consequence: card configuration stays in local files, receipts use an allowlisted schema with credential redaction, and reverse Lightning-to-Arkade work remains a separate implementation and proof.

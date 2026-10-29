@@ -28,6 +28,25 @@ export function preimageFromView(value, paymentHash, depth = 0) {
   return null;
 }
 
+function receiptPreimage(value, paymentHash) {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/^0x/i, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(normalized)) return null;
+  return createHash("sha256").update(Buffer.from(normalized, "hex")).digest("hex") === paymentHash ? normalized : null;
+}
+
+export function statusFromView(view, action) {
+  const providerStatus = String(view?.status || "UNKNOWN").toUpperCase();
+  if (providerStatus === "FAILED") return action?.kind === "arkade_intents_refund" ? "REFUND_READY" : "REFUND_PENDING";
+  const rawStateValue = typeof view?.rawProviderState === "string"
+    ? view.rawProviderState : view?.rawProviderState?.status || view?.rawProviderState?.state;
+  const rawState = String(rawStateValue || "").toUpperCase();
+  if (["COMPLETED", "FILLED", "SETTLED"].includes(providerStatus) || ["FILLED", "SETTLED"].includes(rawState)) {
+    return "COMPLETED";
+  }
+  return view?.status || "UNKNOWN";
+}
+
 function receipt(row, facts, extra = {}) {
   const evidence = row?.evidence || null;
   const arkTxid = row?.fundingTxid || evidence?.result?.arkTxid || null;
@@ -35,7 +54,7 @@ function receipt(row, facts, extra = {}) {
   return {
     orderId: row?.orderId || null,
     paymentHash: facts.paymentHash,
-    preimage: row?.preimage || null,
+    preimage: receiptPreimage(row?.preimage, facts.paymentHash),
     fundingArkTxid: arkTxid,
     fundingOutpoint: outpoint,
     finalStatus: row?.status || "NEW",
@@ -151,7 +170,7 @@ export class CardLightningDriver {
     const view = await this.swapKit.submit(row.orderId, row.action, row.recoveryKey, row.evidence);
     const action = readyAction(view);
     const preimage = preimageFromView(view, facts.paymentHash);
-    const status = view.status === "FAILED" ? (action?.kind === "arkade_intents_refund" ? "REFUND_READY" : "REFUND_PENDING") : view.status;
+    const status = statusFromView(view, action);
     row = this.journal.saveView(facts.paymentHash, view, action, status, preimage);
     return receipt(row, facts);
   }
@@ -211,7 +230,7 @@ export class CardLightningDriver {
     const view = await this.swapKit.status(row.orderId, row.recoveryKey);
     const action = readyAction(view);
     const preimage = preimageFromView(view, facts.paymentHash);
-    const status = view.status === "FAILED" ? (action?.kind === "arkade_intents_refund" ? "REFUND_READY" : "REFUND_PENDING") : view.status;
+    const status = statusFromView(view, action);
     row = this.journal.saveView(facts.paymentHash, view, action, status, preimage);
     return receipt(row, facts);
   }

@@ -8,6 +8,7 @@
     "node": ">=22.13.0 <27"
   },
   "scripts": {
+    "start": "node ./server.js",
     "card-lightning": "node ./cli.js",
     "test": "node --test test/*.test.js"
   },

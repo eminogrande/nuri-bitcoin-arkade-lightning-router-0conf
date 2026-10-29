@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { decodeMainnetInvoice } from "../src/invoice.js";
 import { preimageFromView } from "../src/driver.js";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { AMOUNT, INVOICE, ORDER_ID, TXID, harness } from "./helpers.js";
 
 test("invoice amount mismatch is refused before quote, card, or funding", async () => {
@@ -105,5 +107,40 @@ test("solver failure is REFUND_READY, never completed; funding action stays boun
     assert.deepEqual(row.action, fundingAction);
     h.swapKit.statusView = { orderId: ORDER_ID, status: "FAILED", actions: [] };
     assert.equal((await h.driver.track(h.args)).finalStatus, "REFUND_PENDING");
+  } finally { await h.cleanup(); }
+});
+
+test("COMPLETED, FILLED, SETTLED, and rawProviderState settled map without failure", async () => {
+  const h = await harness();
+  try {
+    await h.prepare();
+    const views = [
+      { status: "COMPLETED", rawProviderState: "settled" },
+      { status: "FILLED" },
+      { status: "SETTLED" },
+      { status: "COMPLETED", rawProviderState: { state: "settled" } },
+    ];
+    for (const view of views) {
+      h.swapKit.statusView = { orderId: ORDER_ID, actions: [], ...view };
+      const tracked = await h.driver.track(h.args);
+      assert.equal(tracked.finalStatus, "COMPLETED");
+      assert.equal(tracked.providerStatus, view.status);
+    }
+    h.swapKit.statusView = { orderId: ORDER_ID, status: "PROCESSING", actions: [] };
+    assert.equal((await h.driver.track(h.args)).finalStatus, "PROCESSING");
+  } finally { await h.cleanup(); }
+});
+
+test("a journaled preimage is returned only when its SHA256 matches the invoice", async () => {
+  const h = await harness();
+  try {
+    await h.prepare();
+    const paymentHash = decodeMainnetInvoice(INVOICE, AMOUNT, 0).paymentHash;
+    const path = join(h.directory, "payments.sqlite");
+    const data = JSON.parse(await readFile(path, "utf8"));
+    data.payments[paymentHash].preimage = "00".repeat(32);
+    await writeFile(path, JSON.stringify(data), "utf8");
+    const tracked = await h.driver.track(h.args);
+    assert.equal(tracked.preimage, null);
   } finally { await h.cleanup(); }
 });

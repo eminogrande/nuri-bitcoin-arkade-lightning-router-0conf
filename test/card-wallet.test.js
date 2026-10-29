@@ -4,7 +4,7 @@ import {
   ArkAddress, ContractManager, DefaultVtxo, RestArkProvider, Wallet,
   contractHandlers, gatedContracts, isGatedVtxo,
 } from "@arkade-os/sdk";
-import { ProductionCardWallet } from "../src/card-wallet.js";
+import { ProductionCardWallet, NuriSendFlow } from "../src/card-wallet.js";
 
 const EXPECTED_ADDRESS = "ark1qzpq904am6clw3pgqwyh4p02708fy4xs0hcpwt7rwfdttuxsjameepfv6ed2mgaw4k2tdts49m4wkk3zqyrjv44sr2gcgxrm47gy7sqnlyjr3x";
 const EXPECTED_SCRIPT = "5120852cd65aada3aead94b6ae152eeaeb5a2201072656b01a9184187baf904f4013";
@@ -89,4 +89,23 @@ test("configured address assertion fails before contract registration", async (t
   );
   assert.equal(boot.managerCreate.mock.callCount(), 0);
   assert.equal(boot.contracts.length, 0);
+});
+
+test("each follow-up cosign carries its own PSBT without replaying the assertion", async () => {
+  const calls = [];
+  const bridge = {
+    async webAuthnAssert() { return { client_data_b64u: "client", auth_data_b64u: "auth", sig_b64u: "sig" }; },
+    async signInputSend(args) { calls.push(args); return "ab".repeat(64); },
+  };
+  const api = { async prepare() { return { challenge: "challenge", challenge_token: "token" }; } };
+  const flow = new NuriSendFlow(config(), bridge, api);
+  flow.sendPackage = { kind: "lightning_invoice", send_intent_id: "intent" };
+  const session = await flow.prepare({ psbtB64: "psbt-checkpoint", signRequests: [{ input_index: 0 }] });
+  await flow.sign({ msg32: "00".repeat(32), inputIndex: 0, session, aggregate33: "aggregate", psbtB64: "psbt-checkpoint" });
+  await flow.sign({ msg32: "11".repeat(32), inputIndex: 1, session, aggregate33: "aggregate", psbtB64: "psbt-follow-up" });
+  assert.equal(calls[0].context.send_package.psbt_b64, "psbt-checkpoint");
+  assert.ok(calls[0].context.assertion);
+  assert.equal(calls[1].context.send_package.psbt_b64, "psbt-follow-up");
+  assert.equal(calls[1].context.send_package.sign_requests, undefined);
+  assert.equal(calls[1].context.assertion, null);
 });

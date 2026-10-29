@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nuri.com/schemas/0conf-receipt.schema.json",
+  "title": "0conf receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "orderId",
+    "paymentHash",
+    "preimage",
+    "fundingArkTxid",
+    "fundingOutpoint",
+    "finalStatus",
+    "providerStatus",
+    "explorers"
+  ],
+  "properties": {
+    "orderId": { "type": ["string", "null"], "pattern": "^ord_" },
+    "paymentHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "preimage": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+    "fundingArkTxid": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+    "fundingOutpoint": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["txid", "vout"],
+          "properties": {
+            "txid": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "vout": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "finalStatus": { "type": "string", "minLength": 1 },
+    "providerStatus": { "type": ["string", "null"] },
+    "explorers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arkTx", "arkOutpoint"],
+      "properties": {
+        "arkTx": { "type": ["string", "null"], "format": "uri" },
+        "arkOutpoint": { "type": ["string", "null"] }
+      }
+    },
+    "quote": { "type": ["object", "null"] },
+    "option": { "type": ["object", "null"] },
+    "dryRun": { "type": "object" },
+    "warning": { "type": "string" }
+  }
+}

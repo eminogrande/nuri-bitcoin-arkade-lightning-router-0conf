@@ -83,7 +83,7 @@ export class CardBackedAggregateIdentity {
     const session = await this.approve({ psbtB64, signRequests });
     for (const item of plan) {
       const sig64 = hexToBytes(await this.cardSign({
-        msg32: bytesToHex(item.msg32), inputIndex: item.idx, session, aggregate33: this.aggregate33,
+        msg32: bytesToHex(item.msg32), inputIndex: item.idx, session, aggregate33: this.aggregate33, psbtB64,
       }));
       const signature = appendTaprootSighash(sig64, item.sighashType);
       copy.updateInput(item.idx, { tapScriptSig: [[
@@ -267,7 +267,7 @@ function installRecoveryWallet(wallet, identity, storage, config) {
   return scripts;
 }
 
-class NuriSendFlow {
+export class NuriSendFlow {
   constructor(config, bridge, api) {
     this.config = config; this.bridge = bridge; this.api = api;
     this.session = null; this.sendPackage = null; this.cosignDone = false;
@@ -278,7 +278,7 @@ class NuriSendFlow {
     const fullPackage = { ...this.sendPackage, psbt_b64: psbtB64, sign_requests: signRequests };
     const prep = await this.api.prepare(fullPackage);
     const assertion = await this.bridge.webAuthnAssert(prep.challenge);
-    const corePackage = { ...this.sendPackage };
+    const corePackage = { ...this.sendPackage, psbt_b64: fullPackage.psbt_b64 };
     this.session = {
       challengeToken: prep.challenge_token, fullPackage, corePackage,
       assertion: {
@@ -288,14 +288,15 @@ class NuriSendFlow {
     };
     return this.session;
   }
-  async sign({ msg32, inputIndex, session, aggregate33 }) {
+  async sign({ msg32, inputIndex, session, aggregate33, psbtB64 }) {
     const first = !this.cosignDone;
+    const corePackage = { ...session.corePackage, psbt_b64: psbtB64 };
     const result = await this.bridge.signInputSend({
       msg32, inputIndex,
       context: {
         challenge_token: session.challengeToken, server_pk33: this.config.serverPk33,
         client_pk33: this.config.cardPk33, aggregate33,
-        send_package: first ? session.fullPackage : session.corePackage,
+        send_package: first ? session.fullPackage : corePackage,
         assertion: first ? session.assertion : null, input_index: inputIndex,
       },
     });
