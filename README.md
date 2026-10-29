@@ -4,8 +4,9 @@ Small `node:http` wrapper around the existing outgoing SwapKit driver: one BOLT1
 
 ## Status and evidence
 
-- **Mainnet flow proven before this wrapper change:** order `ord_d073e885c6d9b72483388085abffb227b29e970f8143ab1feed0840b44a56076`, Ark funding transaction `7d762a0ac6e8f537df44f48708d34bc66b41970803e2e6d706ef962cf2af3fd1`, **1000 sats settled**. The returned preimage's SHA256 matched the invoice payment hash.
-- **This branch:** packages that flow; it does not claim a new live call, deployment, refund execution, or reverse-flow proof.
+- **CLI mainnet proof:** order `ord_d073e885c6d9b72483388085abffb227b29e970f8143ab1feed0840b44a56076`, Ark funding transaction `7d762a0ac6e8f537df44f48708d34bc66b41970803e2e6d706ef962cf2af3fd1`, **1000 sats settled**. The recipient preimage's SHA256 matched the invoice payment hash.
+- **MCP mainnet proof:** order `ord_8fe501e631efc7bee3495a9500012c98a03c90593887fc85ec8c59db50d3ed47`, Ark funding transaction `9066c5781324d0af5d60e58ef5bc3a291d804b344843536637a7d11fced4e7e0`, final status `COMPLETED`, **1000 sats settled**. The recipient preimage's SHA256 matched the invoice payment hash.
+- Machine-readable receipts: [`proofs/mainnet-outgoing.json`](proofs/mainnet-outgoing.json). No production deployment or reverse-flow proof is claimed.
 - The card follow-up cosign fixes are retained: each signature request carries its own PSBT, and checkpoint signatures are preserved when inputs are updated.
 
 ## Start
@@ -58,11 +59,11 @@ npm test
 
 The suite uses synthetic provider/wallet fixtures and an ephemeral loopback HTTP server. It covers the one-tool catalog, dry/execute gating, settled-state mapping, per-PSBT cosign binding, replay/crash handling, and credential leakage. Fixtures are not mainnet proof.
 
-Cloud orb `orb-8dce14dae58b` on Node `v20.19.2` passed all 14 JavaScript syntax checks and the server suite **4/4 in three consecutive runs**. The full dependency-backed `npm test` was not run in this branch: the existing agent box timed out over SSH and the isolated orb had no installed dependencies. Run the command above on the required Node version before release.
+The full dependency-backed `npm test` passed **19/19** on Node `v22.22.3`. Earlier cloud checks also passed the MCP suite; the cloud runner was unavailable for the final full-suite run, which used the already-authorized local card session without live wallet calls.
 
 ## Remaining work and limits
 
 - **Reverse flow (Lightning → Arkade):** implement the reverse SwapKit quote/order binding, issue and bind an incoming Lightning invoice/preimage, define the opposite VHTLC collateral and claim/refund paths, reconcile inbound payment before releasing Arkade funds, add restart/replay and failure fixtures, then run a separate mainnet proof. None of that is exposed by this outgoing-only tool.
 - Outgoing solver refunds are tracked as `REFUND_READY`/`REFUND_PENDING`; refund signing/broadcast is not implemented.
 - After restart, an in-memory Nuri approval session cannot be reconstructed. Existing funding evidence remains resubmittable, but `send/complete` can be `UNAVAILABLE_AFTER_RESTART`.
-- No production deployment, hardware call, or new real-money execution is claimed for this wrapper.
+- No production deployment is claimed. Outgoing CLI and MCP mainnet payments are proven; reverse flow and refund execution remain unproven.

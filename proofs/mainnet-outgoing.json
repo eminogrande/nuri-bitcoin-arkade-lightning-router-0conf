@@ -1,0 +1,33 @@
+{
+  "network": "mainnet",
+  "recipient": "hello@getalby.com",
+  "proofs": [
+    {
+      "interface": "CLI",
+      "orderId": "ord_d073e885c6d9b72483388085abffb227b29e970f8143ab1feed0840b44a56076",
+      "fundingArkTxid": "7d762a0ac6e8f537df44f48708d34bc66b41970803e2e6d706ef962cf2af3fd1",
+      "amountSats": 1000,
+      "depositSats": 1013,
+      "paymentHash": "321bf65ff86228790abc196820433949901f089ea14512d0a80aed403b6b18dc",
+      "preimage": "f6da59b92172f6de9c9aef21f3fce704f8bce6c2ed78c9a120803b1602ee696b",
+      "recipientSettled": true,
+      "preimageHashVerified": true
+    },
+    {
+      "interface": "MCP",
+      "orderId": "ord_8fe501e631efc7bee3495a9500012c98a03c90593887fc85ec8c59db50d3ed47",
+      "fundingArkTxid": "9066c5781324d0af5d60e58ef5bc3a291d804b344843536637a7d11fced4e7e0",
+      "fundingOutpoint": {
+        "txid": "9066c5781324d0af5d60e58ef5bc3a291d804b344843536637a7d11fced4e7e0",
+        "vout": 0
+      },
+      "amountSats": 1000,
+      "depositSats": 1020,
+      "paymentHash": "d9cc43d7f1be857507f0d60400a6d576093b34e105494e1214175daca92d8673",
+      "preimage": "35d023d264c98ac18db9197e66a241706cc3b9194e976811d278b69fc65c2457",
+      "recipientSettled": true,
+      "preimageHashVerified": true,
+      "finalStatus": "COMPLETED"
+    }
+  ]
+}

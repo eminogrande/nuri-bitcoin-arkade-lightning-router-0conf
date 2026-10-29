@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   ArkAddress, ContractManager, DefaultVtxo, RestArkProvider, Wallet,
-  contractHandlers, gatedContracts, isGatedVtxo,
+  contractHandlers, gatedContracts, gateExclusion,
 } from "@arkade-os/sdk";
 import { ProductionCardWallet, NuriSendFlow } from "../src/card-wallet.js";
 
@@ -44,7 +44,7 @@ function mockWalletBoot(t, { offchainCsv = OFFCHAIN_CSV } = {}) {
     wallet = {
       identity, arkServerPublicKey, network: { hrp: "ark" }, indexerProvider: {},
       offchainTapscript: defaultScript(offchainCsv), boardingTapscript: defaultScript(BOARDING_CSV),
-      async getAddress() { return this.offchainTapscript.address(this.network.hrp, this.arkServerPublicKey).encode(); },
+      async getAddress() { return this._offchainTapscript.address(this.network.hrp, this.arkServerPublicKey).encode(); },
       async getContractManager() {
         if (!this._contractManager) this._contractManager = await this.initializeContractManager();
         return this._contractManager;
@@ -61,7 +61,7 @@ test("existing 7499-sat Nuri recovery VTXO reconstructs and decodes as generical
   const wallet = boot.wallet();
   assert.equal(production.wallet, wallet);
   assert.equal(await wallet.getAddress(), EXPECTED_ADDRESS);
-  assert.equal(hex(wallet.offchainTapscript.pkScript), EXPECTED_SCRIPT);
+  assert.equal(hex(wallet._offchainTapscript.pkScript), EXPECTED_SCRIPT);
   assert.equal(boot.managerCreate.mock.callCount(), 1);
   assert.equal(boot.contracts.length, 2);
   assert.deepEqual(await wallet.getWalletScripts(), [EXPECTED_SCRIPT, boot.contracts[1].script]);
@@ -78,7 +78,7 @@ test("existing 7499-sat Nuri recovery VTXO reconstructs and decodes as generical
     txid: "a20b32f23b786590df92c5c823718fd1b86395cfb5c53e60ae7eae57499ff334",
     vout: 0, value: 7499n, script: EXPECTED_SCRIPT,
   };
-  assert.equal(isGatedVtxo(vtxo7499, gatedContracts(boot.contracts)), false);
+  assert.equal(gateExclusion(gatedContracts(boot.contracts))(vtxo7499), undefined);
 });
 
 test("configured address assertion fails before contract registration", async (t) => {

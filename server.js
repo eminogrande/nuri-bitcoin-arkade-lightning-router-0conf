@@ -30,9 +30,10 @@ const tool = {
   outputSchema: receiptSchema,
 };
 
+const SECRET_VALUE_KEYS = new Set(["credid", "recoverykey", "pin", "password", "privatekey", "mnemonic", "secret"]);
 function secretsFrom(config) {
   return Object.entries(config || {})
-    .filter(([key, value]) => !SAFE_CONFIG_KEYS.has(key) && typeof value === "string" && value.length >= 4)
+    .filter(([key, value]) => SECRET_VALUE_KEYS.has(key.toLowerCase().replace(/[_-]/g, "")) && typeof value === "string" && value.length >= 16)
     .map(([, value]) => value)
     .sort((a, b) => b.length - a.length);
 }

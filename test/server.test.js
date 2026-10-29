@@ -88,6 +88,7 @@ test("quote and track stay read-only and omit execute from the driver call", asy
 test("card credentials never appear in success, error, catalog, or health responses", async (t) => {
   const config = {
     owner: "0xpublic",
+    credProfile: "arkade",
     credId: "cred-sentinel-12345",
     cardPk33: "card-sentinel-12345",
     serverPk33: "server-sentinel-12345",
@@ -97,7 +98,7 @@ test("card credentials never appear in success, error, catalog, or health respon
     if (action === "track") throw new Error(`provider rejected ${config.credId}`);
     return {
       ...receipt(), credId: config.credId,
-      quote: { echo: `do not expose ${config.credId}`, cardPk33: config.cardPk33, safe: "public quote" },
+      quote: { echo: `do not expose ${config.credId}`, provider: `${config.credProfile}-intents`, cardPk33: config.cardPk33, safe: "public quote" },
     };
   });
   const f = await fixture(t, driver, config);
@@ -111,6 +112,7 @@ test("card credentials never appear in success, error, catalog, or health respon
   for (const secret of [config.credId, config.cardPk33, config.serverPk33, config.prfScript]) {
     assert.equal(combined.includes(secret), false);
   }
+  assert.equal(success.result.structuredContent.quote.provider, "arkade-intents");
   assert.equal(success.result.structuredContent.quote.safe, "public quote");
   assert.equal(success.result.structuredContent.quote.cardPk33, "[redacted]");
   assert.equal(error.result.isError, true);
